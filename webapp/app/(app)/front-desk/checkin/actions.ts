@@ -2,7 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { FolioType, ReservationStatus, Prisma } from "@prisma/client";
+import { FolioType, ReservationStatus, RoomStatus, Prisma } from "@prisma/client";
 import { redirect } from "next/navigation";
 
 function startOfDay(d: Date) {
@@ -49,8 +49,19 @@ export async function assignRoomAndCheckIn(reservationId: string, roomId: string
     if (!rr.roomId) {
       const targetRoomId = roomId;
       if (!targetRoomId) throw new Error("Kamar belum dipilih");
+      // Atomic claim before anything is assigned: flip the room to OC only
+      // while it is still vacant. Two front-desk tabs whose candidate lists
+      // were both rendered before either check-in finished would otherwise
+      // each assign the same room, leaving two guests in-house in one room.
+      const claim = await prisma.room.updateMany({
+        where: { id: targetRoomId, status: { in: [RoomStatus.VI, RoomStatus.VC] } },
+        data: { status: RoomStatus.OC },
+      });
+      if (claim.count === 0) {
+        const taken = await prisma.room.findUnique({ where: { id: targetRoomId } });
+        throw new Error(`Kamar ${taken?.number ?? "ini"} sudah tidak tersedia — silakan pilih kamar lain.`);
+      }
       await prisma.reservationRoom.update({ where: { id: rr.id }, data: { roomId: targetRoomId, checkInAt: new Date() } });
-      await prisma.room.update({ where: { id: targetRoomId }, data: { status: "OC" } });
     } else {
       await prisma.room.update({ where: { id: rr.roomId }, data: { status: "OC" } });
     }

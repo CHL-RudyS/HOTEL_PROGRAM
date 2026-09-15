@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { rp } from "@/lib/format";
 import { updateGuestContact, assignRoomAndCheckIn } from "@/app/(app)/front-desk/checkin/actions";
 
@@ -37,6 +38,8 @@ export function CheckinWizard(props: {
   const [preferences, setPreferences] = useState(props.preferences);
   const [pickedRoomId, setPickedRoomId] = useState<string | null>(props.candidateRooms[0]?.id ?? null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const router = useRouter();
 
   if (props.alreadyInHouse) {
     return (
@@ -57,20 +60,31 @@ export function CheckinWizard(props: {
   const tax = Math.round(total * 0.21);
 
   async function goNext() {
-    if (stepKey === "Verifikasi identitas") {
-      setBusy(true);
-      await updateGuestContact(props.reservationId, phone, preferences);
+    setError("");
+    try {
+      if (stepKey === "Verifikasi identitas") {
+        setBusy(true);
+        await updateGuestContact(props.reservationId, phone, preferences);
+        setStepIdx((i) => i + 1);
+      } else if (stepKey === "Pilih kamar" || stepKey === "Registration card") {
+        setStepIdx((i) => i + 1);
+      } else if (stepKey === "Encode kunci") {
+        setBusy(true);
+        await assignRoomAndCheckIn(props.reservationId, pickedRoomId);
+        setStepIdx((i) => i + 1);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Gagal memproses check-in");
+      // The picked room may have just been taken by another terminal; pull a
+      // fresh candidate list and send the user back to choose again.
+      const pickIdx = STEPS.indexOf("Pilih kamar");
+      if (stepKey === "Encode kunci" && pickIdx >= 0) {
+        setPickedRoomId(null);
+        setStepIdx(pickIdx);
+        router.refresh();
+      }
+    } finally {
       setBusy(false);
-      setStepIdx((i) => i + 1);
-    } else if (stepKey === "Pilih kamar") {
-      setStepIdx((i) => i + 1);
-    } else if (stepKey === "Registration card") {
-      setStepIdx((i) => i + 1);
-    } else if (stepKey === "Encode kunci") {
-      setBusy(true);
-      await assignRoomAndCheckIn(props.reservationId, pickedRoomId);
-      setBusy(false);
-      setStepIdx((i) => i + 1);
     }
   }
 
@@ -107,6 +121,12 @@ export function CheckinWizard(props: {
           {props.isGroup ? ` · ${props.groupRoomCount} kamar` : ""}
         </span>
       </div>
+
+      {error && (
+        <div style={{ fontSize: 13, color: "var(--color-accent-2-700)", background: "color-mix(in srgb, var(--color-accent-2) 8%, transparent)", padding: "var(--space-3)" }}>
+          {error}
+        </div>
+      )}
 
       {stepKey === "Verifikasi identitas" && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: "var(--space-6)" }}>
