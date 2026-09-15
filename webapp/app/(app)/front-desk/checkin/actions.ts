@@ -58,7 +58,10 @@ export async function assignRoomAndCheckIn(reservationId: string, roomId: string
 
   await prisma.reservation.update({ where: { id: reservationId }, data: { status: ReservationStatus.IN_HOUSE } });
 
-  let folioId = reservation.folios.find((f) => f.type === FolioType.A)?.id;
+  // Group bookings (and any reservation with pre-seeded billing) already have
+  // a folio — e.g. the master Folio C for a group. Only spin up a fresh
+  // Folio A when the reservation has no folio at all yet.
+  let folioId = reservation.folios[0]?.id;
   if (!folioId) {
     const nights = Math.round((reservation.departure.getTime() - reservation.arrival.getTime()) / 86400000);
     const primary = reservation.rooms[0];
