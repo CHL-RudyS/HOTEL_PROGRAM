@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { signOut } from "next-auth/react";
 import { SCREENS, screenForPath } from "@/lib/screens";
 
 export function MenuLayar() {
@@ -97,6 +98,32 @@ export function MenuLayar() {
               );
             })}
           </div>
+          <div style={{ borderTop: "1px solid rgba(255,255,255,0.12)", margin: "2px 0" }} />
+          <button
+            onClick={() => signOut({ callbackUrl: "/login" })}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              width: "100%",
+              textAlign: "left",
+              border: 0,
+              cursor: "pointer",
+              borderRadius: 999,
+              padding: "8px 14px",
+              fontFamily: "var(--font-body)",
+              fontSize: 14,
+              background: "transparent",
+              color: "var(--color-bg)",
+              opacity: 0.85,
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" style={{ flex: "none" }}>
+              <path d="M112 216h-40a8 8 0 0 1-8-8V48a8 8 0 0 1 8-8h40a8 8 0 0 1 0 16H80v144h32a8 8 0 0 1 0 16Z" />
+              <path d="M221.66 122.34l-40-40a8 8 0 0 0-11.32 11.32L198.75 122H104a8 8 0 0 0 0 16h94.75l-28.41 28.34a8 8 0 1 0 11.32 11.32l40-40a8 8 0 0 0 0-11.32Z" />
+            </svg>
+            <span>Keluar</span>
+          </button>
         </div>
       )}
       <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", background: "var(--color-neutral-800)", borderRadius: 999, padding: 7, boxShadow: "var(--shadow-lg)" }}>

@@ -25,6 +25,13 @@ export const authOptions: AuthOptions = {
       },
     }),
   ],
+  events: {
+    async signOut({ token }) {
+      if (token.uid) {
+        await prisma.user.update({ where: { id: token.uid }, data: { lastLogoutAt: new Date() } });
+      }
+    },
+  },
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
