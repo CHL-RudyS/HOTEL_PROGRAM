@@ -8,7 +8,7 @@ export default async function FolioPage({ searchParams }: { searchParams: { rese
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)", maxWidth: 1000 }}>
       <ScreenHeader title="FD - Folio View" />
-      {ctx ? <FolioView folios={ctx.folios} /> : <p>Tidak ada folio untuk ditampilkan.</p>}
+      {ctx && ctx.folios.length > 0 ? <FolioView folios={ctx.folios} /> : <p>Tidak ada folio untuk ditampilkan — tamu ini belum check-in.</p>}
     </div>
   );
 }
