@@ -24,7 +24,10 @@ export async function getHousekeepingData(propertyId: string) {
   const tasks = await prisma.housekeepingTask.findMany({
     where: { room: { propertyId } },
     include: { room: { include: { roomType: true } }, assignee: true },
-    orderBy: { createdAt: "asc" },
+    // id as a tiebreaker: seed data batch-inserts all tasks with the same
+    // createdAt, so sorting on createdAt alone reorders the list whenever a
+    // row is updated (its physical tuple moves) — id is stable across updates.
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
 
   const assignee = tasks[0]?.assignee;
