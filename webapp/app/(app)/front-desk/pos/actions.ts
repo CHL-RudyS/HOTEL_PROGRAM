@@ -3,6 +3,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { revalidatePath } from "next/cache";
+import { Prisma } from "@prisma/client";
 
 async function recomputeTotals(orderId: string) {
   const items = await prisma.pOSOrderItem.findMany({ where: { orderId } });
@@ -14,31 +15,45 @@ async function recomputeTotals(orderId: string) {
 }
 
 async function getOrCreateOpenOrder(outletId: string) {
-  let order = await prisma.pOSOrder.findFirst({ where: { outletId, status: "OPEN" } });
-  if (!order) {
+  const existing = await prisma.pOSOrder.findFirst({ where: { outletId, status: "OPEN" } });
+  if (existing) return existing;
+  // Two concurrent requests (e.g. a double-tap on a touch POS) can both see
+  // no open order and race to create one; openOutletKey's unique constraint
+  // lets the DB reject the loser instead of silently creating a duplicate
+  // order, and we just fetch the winner's row instead.
+  try {
     const waiter = await prisma.employee.findFirst({ where: { department: "FNB" } });
-    order = await prisma.pOSOrder.create({ data: { outletId, tableNumber: "12", paxCount: 2, waiterId: waiter?.id } });
+    return await prisma.pOSOrder.create({ data: { outletId, tableNumber: "12", paxCount: 2, waiterId: waiter?.id, openOutletKey: outletId } });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return await prisma.pOSOrder.findFirstOrThrow({ where: { outletId, status: "OPEN" } });
+    }
+    throw err;
   }
-  return order;
 }
 
 export async function addMenuItem(outletId: string, menuItemId: string) {
   await requireSession();
   const order = await getOrCreateOpenOrder(outletId);
   const menuItem = await prisma.pOSMenuItem.findUniqueOrThrow({ where: { id: menuItemId } });
-  const existing = await prisma.pOSOrderItem.findFirst({ where: { orderId: order.id, menuItemId } });
-  if (existing) {
-    await prisma.pOSOrderItem.update({ where: { id: existing.id }, data: { qty: existing.qty + 1 } });
-  } else {
-    await prisma.pOSOrderItem.create({ data: { orderId: order.id, menuItemId, name: menuItem.name, qty: 1, price: menuItem.price } });
-  }
+  // upsert on the (orderId, menuItemId) unique constraint: atomic at the DB
+  // level, so concurrent add-clicks increment one row instead of racing to
+  // each create their own duplicate line.
+  await prisma.pOSOrderItem.upsert({
+    where: { orderId_menuItemId: { orderId: order.id, menuItemId } },
+    update: { qty: { increment: 1 } },
+    create: { orderId: order.id, menuItemId, name: menuItem.name, qty: 1, price: menuItem.price },
+  });
   await recomputeTotals(order.id);
   revalidatePath("/front-desk/pos");
 }
 
 export async function decrementItem(orderItemId: string) {
   await requireSession();
-  const item = await prisma.pOSOrderItem.findUniqueOrThrow({ where: { id: orderItemId } });
+  // Idempotent: a double-click (or stale UI) may target a line already
+  // removed by a previous click — treat that as a no-op, not an error.
+  const item = await prisma.pOSOrderItem.findUnique({ where: { id: orderItemId } });
+  if (!item) return;
   if (item.qty > 1) {
     await prisma.pOSOrderItem.update({ where: { id: orderItemId }, data: { qty: item.qty - 1 } });
   } else {
@@ -70,7 +85,7 @@ export async function chargeToRoom(orderId: string, roomNumber: string) {
   await prisma.folioTransaction.create({
     data: { folioId: folio.id, date: new Date(new Date().toDateString()), code: "FB-RST", description: `${order.outlet.name} — meja ${order.tableNumber}`, debit: order.total, credit: 0, postedById: session.user.id },
   });
-  await prisma.pOSOrder.update({ where: { id: orderId }, data: { status: "CLOSED" } });
+  await prisma.pOSOrder.update({ where: { id: orderId }, data: { status: "CLOSED", openOutletKey: null } });
   await prisma.auditLog.create({ data: { userId: session.user.id, entity: "POSOrder", entityId: orderId, action: "charge_to_room", newValue: { roomNumber } } });
 
   revalidatePath("/front-desk/pos");

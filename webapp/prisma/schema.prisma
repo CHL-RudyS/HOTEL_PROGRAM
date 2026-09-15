@@ -407,6 +407,12 @@ model POSOrder {
   waiterId      String?
   waiter        Employee?      @relation(fields: [waiterId], references: [id])
   status        PosOrderStatus @default(OPEN)
+  // Mirrors outletId while status=OPEN, set to null on close. A unique
+  // constraint on a nullable column allows unlimited nulls (closed orders)
+  // but at most one non-null value per outlet — i.e. at most one open order
+  // per outlet, enforced atomically at the DB level against concurrent
+  // "add to cart" requests racing to create the first order for a table.
+  openOutletKey String?        @unique
   subtotal      Int            @default(0)
   serviceCharge Int            @default(0)
   tax           Int            @default(0)
@@ -427,6 +433,8 @@ model POSOrderItem {
   name       String
   qty        Int
   price      Int
+
+  @@unique([orderId, menuItemId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────

@@ -18,12 +18,20 @@ export function PosScreen({ outletId, outletName, categories, itemsByCategory, o
   const [error, setError] = useState("");
 
   async function add(menuItemId: string) {
-    await addMenuItem(outletId, menuItemId);
-    router.refresh();
+    try {
+      await addMenuItem(outletId, menuItemId);
+      router.refresh();
+    } catch {
+      // best-effort — a stale click failing here isn't worth a modal
+    }
   }
   async function minus(orderItemId: string) {
-    await decrementItem(orderItemId);
-    router.refresh();
+    try {
+      await decrementItem(orderItemId);
+      router.refresh();
+    } catch {
+      // best-effort — a stale click failing here isn't worth a modal
+    }
   }
   async function submitCharge(e: React.FormEvent) {
     e.preventDefault();
