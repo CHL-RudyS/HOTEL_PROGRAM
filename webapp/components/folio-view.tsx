@@ -27,6 +27,14 @@ export function FolioView({ folios }: { folios: Folio[] }) {
 
   const active = folios.find((f) => f.id === activeId) ?? folios[0];
 
+  function closeDialog() {
+    setDialogOpen(false);
+    setCode("");
+    setAmount("");
+    setReason("");
+    setError("");
+  }
+
   async function submitCharge(e: React.FormEvent) {
     e.preventDefault();
     if (!active) return;
@@ -118,7 +126,7 @@ export function FolioView({ folios }: { folios: Folio[] }) {
       <div style={{ fontSize: 11, color: "var(--color-neutral-700)" }}>Setiap adjustment, rebate, dan void wajib mencantumkan alasan dan otorisasi supervisor. Semua perubahan tercatat di audit log.</div>
 
       {dialogOpen && (
-        <div className="dialog-backdrop" onClick={() => setDialogOpen(false)}>
+        <div className="dialog-backdrop" onClick={closeDialog}>
           <div className="dialog" onClick={(e) => e.stopPropagation()}>
             <div className="dialog-title">Posting manual charge</div>
             <form onSubmit={submitCharge} className="dialog-body" style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
@@ -137,7 +145,7 @@ export function FolioView({ folios }: { folios: Folio[] }) {
               <div style={{ fontSize: 11, color: "var(--color-neutral-700)" }}>Butuh otorisasi supervisor untuk nilai di atas Rp 1.000.000.</div>
               {error && <div style={{ fontSize: 12, color: "var(--color-accent-2-700)" }}>{error}</div>}
               <div className="dialog-actions">
-                <button type="button" className="btn btn-secondary" onClick={() => { setError(""); setDialogOpen(false); }}>
+                <button type="button" className="btn btn-secondary" onClick={closeDialog}>
                   Batal
                 </button>
                 <button type="submit" disabled={submitting} className="btn btn-primary">

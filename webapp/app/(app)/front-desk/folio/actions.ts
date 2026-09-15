@@ -12,6 +12,7 @@ export async function postCharge(folioId: string, code: string, amount: number, 
   const session = await requireSession();
   if (!reason.trim()) throw new Error("Alasan posting wajib diisi");
   if (amount <= 0) throw new Error("Jumlah harus lebih dari 0");
+  if (!Number.isFinite(amount) || amount > 999_999_999) throw new Error("Jumlah maksimum per posting adalah Rp 999.999.999.");
 
   await prisma.folioTransaction.create({
     data: {
