@@ -23,6 +23,7 @@ export function FolioView({ folios }: { folios: Folio[] }) {
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
 
   const active = folios.find((f) => f.id === activeId) ?? folios[0];
 
@@ -30,6 +31,7 @@ export function FolioView({ folios }: { folios: Folio[] }) {
     e.preventDefault();
     if (!active) return;
     setSubmitting(true);
+    setError("");
     try {
       await postCharge(active.id, code, Number(amount), reason);
       setDialogOpen(false);
@@ -37,6 +39,8 @@ export function FolioView({ folios }: { folios: Folio[] }) {
       setAmount("");
       setReason("");
       router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Gagal memposting charge");
     } finally {
       setSubmitting(false);
     }
@@ -97,7 +101,13 @@ export function FolioView({ folios }: { folios: Folio[] }) {
       </table>
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
-        <button className="btn btn-primary" onClick={() => setDialogOpen(true)}>
+        <button
+          className="btn btn-primary"
+          onClick={() => {
+            setError("");
+            setDialogOpen(true);
+          }}
+        >
           Posting charge
         </button>
         <button className="btn btn-secondary">Split bill</button>
@@ -125,8 +135,9 @@ export function FolioView({ folios }: { folios: Folio[] }) {
                 <input className="input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Tulis alasan posting" required />
               </div>
               <div style={{ fontSize: 11, color: "var(--color-neutral-700)" }}>Butuh otorisasi supervisor untuk nilai di atas Rp 1.000.000.</div>
+              {error && <div style={{ fontSize: 12, color: "var(--color-accent-2-700)" }}>{error}</div>}
               <div className="dialog-actions">
-                <button type="button" className="btn btn-secondary" onClick={() => setDialogOpen(false)}>
+                <button type="button" className="btn btn-secondary" onClick={() => { setError(""); setDialogOpen(false); }}>
                   Batal
                 </button>
                 <button type="submit" disabled={submitting} className="btn btn-primary">
