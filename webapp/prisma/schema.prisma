@@ -1,0 +1,649 @@
+// HotelOne HMS — Prisma schema
+//
+// Two tiers of models:
+//  1. Core models back the 10 implemented screens (auth, unit/property picker,
+//     front desk dashboard, availability grid, check-in wizard, folio, room
+//     rack, housekeeping, POS, GM dashboard).
+//  2. Stub models (marked below) exist so the PRD's other modules — CRM &
+//     Loyalty, MICE/Banquet, Inventory & Procurement, HR & Duty Roster,
+//     Accounting — have a real schema and minimal list/get API routes, even
+//     though no screen renders them yet.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Org structure
+// ─────────────────────────────────────────────────────────────────────────
+
+/// The corporate group shown in "01 Cabang & Lokasi" as "Daftar Perusahaan"
+/// (e.g. CIPTA HARMONI LESTARI). Owns one or more Property records.
+model Corporation {
+  id         String     @id @default(cuid())
+  name       String
+  properties Property[]
+
+  createdAt DateTime @default(now())
+}
+
+model Property {
+  id            String      @id @default(cuid())
+  corporationId String
+  corporation   Corporation @relation(fields: [corporationId], references: [id])
+  code          String      @unique
+  name          String
+  city          String
+  timezone      String      @default("Asia/Jakarta")
+  currency      String      @default("IDR")
+  roomCount     Int         @default(0)
+
+  roomTypes          RoomType[]
+  rooms              Room[]
+  ratePlans          RatePlan[]
+  reservations       Reservation[]
+  posOutlets         POSOutlet[]
+  workOrders         WorkOrder[]
+  employees          Employee[]
+  dailyMetrics       DailyPropertyMetric[]
+  departmentRevenues DepartmentRevenueDay[]
+  channelConnections ChannelConnection[]
+  inventoryItems     InventoryItem[]
+  purchaseOrders     PurchaseOrder[]
+  eventSpaces        EventSpace[]
+  journalEntries     JournalEntry[]
+  users              User[]
+
+  createdAt DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Staff / auth
+// ─────────────────────────────────────────────────────────────────────────
+
+enum Department {
+  FRONT_OFFICE
+  HOUSEKEEPING
+  FNB
+  FINANCE
+  GM
+  ENGINEERING
+  SALES
+  IT
+}
+
+model Employee {
+  id         String     @id @default(cuid())
+  propertyId String
+  property   Property   @relation(fields: [propertyId], references: [id])
+  name       String
+  department Department
+  position   String
+  phone      String?
+
+  user              User?
+  housekeepingTasks HousekeepingTask[]
+  posOrders         POSOrder[]
+  dutyShifts        DutyShift[]
+
+  createdAt DateTime @default(now())
+}
+
+enum UserRole {
+  FRONT_OFFICE
+  BACK_OFFICE
+}
+
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  passwordHash   String
+  role           UserRole
+  name           String
+  employeeId     String?   @unique
+  employee       Employee? @relation(fields: [employeeId], references: [id])
+  homePropertyId String
+  homeProperty   Property  @relation(fields: [homePropertyId], references: [id])
+  lastLoginAt    DateTime?
+  lastLogoutAt   DateTime?
+
+  postedTransactions FolioTransaction[]
+  auditLogs          AuditLog[]
+
+  createdAt DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Rooms, rates, availability
+// ─────────────────────────────────────────────────────────────────────────
+
+model RoomType {
+  id         String   @id @default(cuid())
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id])
+  code       String
+  name       String
+  capacity   Int      @default(2)
+  barRate    Int
+
+  rooms            Room[]
+  rateDetails      RateDetail[]
+  reservationRooms ReservationRoom[]
+
+  @@unique([propertyId, code])
+}
+
+enum RoomStatus {
+  VC // Vacant Clean
+  VI // Vacant Inspected
+  VD // Vacant Dirty
+  OC // Occupied Clean
+  OD // Occupied Dirty
+  OOO // Out of Order
+  OOS // Out of Service
+}
+
+model Room {
+  id         String     @id @default(cuid())
+  propertyId String
+  property   Property   @relation(fields: [propertyId], references: [id])
+  roomTypeId String
+  roomType   RoomType   @relation(fields: [roomTypeId], references: [id])
+  number     String
+  floor      Int
+  status     RoomStatus @default(VC)
+  note       String?
+
+  reservationRooms  ReservationRoom[]
+  housekeepingTasks HousekeepingTask[]
+  workOrders        WorkOrder[]
+
+  @@unique([propertyId, number])
+}
+
+model RatePlan {
+  id                 String   @id @default(cuid())
+  propertyId         String
+  property           Property @relation(fields: [propertyId], references: [id])
+  code               String
+  name               String
+  cancellationPolicy String
+
+  rateDetails      RateDetail[]
+  reservationRooms ReservationRoom[]
+
+  @@unique([propertyId, code])
+}
+
+model RateDetail {
+  id              String   @id @default(cuid())
+  ratePlanId      String
+  ratePlan        RatePlan @relation(fields: [ratePlanId], references: [id])
+  roomTypeId      String
+  roomType        RoomType @relation(fields: [roomTypeId], references: [id])
+  date            DateTime @db.Date
+  price           Int
+  minStay         Int      @default(1)
+  closedToArrival Boolean  @default(false)
+  stopSell        Boolean  @default(false)
+
+  @@unique([ratePlanId, roomTypeId, date])
+}
+
+/// PRD Module 4 (Channel Manager) — sync-status panel shown on the
+/// Availability Grid screen.
+model ChannelConnection {
+  id         String   @id @default(cuid())
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id])
+  name       String
+  lastSyncAt DateTime @default(now())
+  status     String   @default("connected")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Guests, corporate billing accounts
+// ─────────────────────────────────────────────────────────────────────────
+
+model Guest {
+  id               String  @id @default(cuid())
+  name             String
+  idNumber         String?
+  phone            String?
+  email            String?
+  preferences      String?
+  vipTier          String?
+  marketingConsent Boolean @default(false)
+
+  reservations   Reservation[]
+  loyaltyProfile LoyaltyProfile?
+
+  createdAt DateTime @default(now())
+}
+
+/// PRD's `Company` entity: a corporate billing account (city ledger),
+/// distinct from `Corporation` (the hotel-group picker on screen 01).
+model CorporateAccount {
+  id          String  @id @default(cuid())
+  name        String
+  npwp        String?
+  creditLimit Int
+  contractRef String?
+
+  reservations  Reservation[]
+  eventBookings EventBooking[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Reservations, folios, payments
+// ─────────────────────────────────────────────────────────────────────────
+
+enum ReservationStatus {
+  TENTATIVE
+  CONFIRMED
+  GUARANTEED
+  IN_HOUSE
+  CHECKED_OUT
+  CANCELLED
+  NO_SHOW
+  WAITLIST
+  EXPIRED
+}
+
+model Reservation {
+  id                 String            @id @default(cuid())
+  code               String            @unique
+  propertyId         String
+  property           Property          @relation(fields: [propertyId], references: [id])
+  guestId            String
+  guest              Guest             @relation(fields: [guestId], references: [id])
+  corporateAccountId String?
+  corporateAccount   CorporateAccount? @relation(fields: [corporateAccountId], references: [id])
+  groupCode          String?
+  groupName          String?
+  source             String
+  arrival            DateTime          @db.Date
+  departure          DateTime          @db.Date
+  adults             Int               @default(1)
+  children           Int               @default(0)
+  status             ReservationStatus @default(CONFIRMED)
+  specialRequest     String?
+  vipTag             String?
+
+  rooms  ReservationRoom[]
+  folios Folio[]
+
+  createdAt DateTime @default(now())
+}
+
+model ReservationRoom {
+  id            String      @id @default(cuid())
+  reservationId String
+  reservation   Reservation @relation(fields: [reservationId], references: [id])
+  roomTypeId    String
+  roomType      RoomType    @relation(fields: [roomTypeId], references: [id])
+  ratePlanId    String
+  ratePlan      RatePlan    @relation(fields: [ratePlanId], references: [id])
+  roomId        String?
+  room          Room?       @relation(fields: [roomId], references: [id])
+  checkInAt     DateTime?
+  checkOutAt    DateTime?
+}
+
+enum FolioType {
+  A // guest
+  B // company
+  C // group/master
+}
+
+model Folio {
+  id            String      @id @default(cuid())
+  reservationId String
+  reservation   Reservation @relation(fields: [reservationId], references: [id])
+  type          FolioType
+  ownerLabel    String
+  routingNote   String
+
+  transactions FolioTransaction[]
+  payments     Payment[]
+
+  createdAt DateTime @default(now())
+}
+
+model FolioTransaction {
+  id          String   @id @default(cuid())
+  folioId     String
+  folio       Folio    @relation(fields: [folioId], references: [id])
+  date        DateTime @db.Date
+  code        String
+  description String
+  debit       Int      @default(0)
+  credit      Int      @default(0)
+  postedById  String?
+  postedBy    User?    @relation(fields: [postedById], references: [id])
+
+  createdAt DateTime @default(now())
+}
+
+model Payment {
+  id        String  @id @default(cuid())
+  folioId   String
+  folio     Folio   @relation(fields: [folioId], references: [id])
+  method    String
+  amount    Int
+  reference String?
+  status    String  @default("captured")
+
+  createdAt DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Housekeeping
+// ─────────────────────────────────────────────────────────────────────────
+
+enum HkTaskStatus {
+  VD
+  CLEANING
+  VC
+  VI
+}
+
+model HousekeepingTask {
+  id         String       @id @default(cuid())
+  roomId     String
+  room       Room         @relation(fields: [roomId], references: [id])
+  date       DateTime     @db.Date
+  assigneeId String?
+  assignee   Employee?    @relation(fields: [assigneeId], references: [id])
+  status     HkTaskStatus
+  priority   String
+  note       String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Point of Sale
+// ─────────────────────────────────────────────────────────────────────────
+
+model POSOutlet {
+  id         String   @id @default(cuid())
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id])
+  name       String
+
+  menuItems POSMenuItem[]
+  orders    POSOrder[]
+}
+
+model POSMenuItem {
+  id       String    @id @default(cuid())
+  outletId String
+  outlet   POSOutlet @relation(fields: [outletId], references: [id])
+  category String
+  name     String
+  price    Int
+
+  orderItems POSOrderItem[]
+}
+
+enum PosOrderStatus {
+  OPEN
+  CLOSED
+}
+
+model POSOrder {
+  id            String         @id @default(cuid())
+  outletId      String
+  outlet        POSOutlet      @relation(fields: [outletId], references: [id])
+  tableNumber   String
+  paxCount      Int            @default(1)
+  waiterId      String?
+  waiter        Employee?      @relation(fields: [waiterId], references: [id])
+  status        PosOrderStatus @default(OPEN)
+  subtotal      Int            @default(0)
+  serviceCharge Int            @default(0)
+  tax           Int            @default(0)
+  total         Int            @default(0)
+
+  items POSOrderItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model POSOrderItem {
+  id         String      @id @default(cuid())
+  orderId    String
+  order      POSOrder    @relation(fields: [orderId], references: [id])
+  menuItemId String
+  menuItem   POSMenuItem @relation(fields: [menuItemId], references: [id])
+  name       String
+  qty        Int
+  price      Int
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Maintenance / work orders (PRD Module 12)
+// ─────────────────────────────────────────────────────────────────────────
+
+enum WorkOrderStatus {
+  OPEN
+  IN_PROGRESS
+  DONE
+}
+
+enum WorkOrderPriority {
+  LOW
+  NORMAL
+  HIGH
+  CRITICAL
+}
+
+model WorkOrder {
+  id          String            @id @default(cuid())
+  propertyId  String
+  property    Property          @relation(fields: [propertyId], references: [id])
+  roomId      String?
+  room        Room?             @relation(fields: [roomId], references: [id])
+  code        String            @unique
+  category    String
+  priority    WorkOrderPriority @default(NORMAL)
+  status      WorkOrderStatus   @default(OPEN)
+  description String
+
+  createdAt DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Reporting fact tables backing the GM Dashboard
+// ─────────────────────────────────────────────────────────────────────────
+
+model DailyPropertyMetric {
+  id               String   @id @default(cuid())
+  propertyId       String
+  property         Property @relation(fields: [propertyId], references: [id])
+  date             DateTime @db.Date
+  roomsAvailable   Int
+  roomsSold        Int
+  roomRevenue      Int
+  totalRevenue     Int
+  directBookingPct Decimal  @db.Decimal(5, 2)
+
+  @@unique([propertyId, date])
+}
+
+enum RevenueDepartment {
+  ROOM
+  FNB_RESTAURANT
+  BANQUET_MICE
+  SPA_WELLNESS
+  LAUNDRY_OTHER
+}
+
+model DepartmentRevenueDay {
+  id              String            @id @default(cuid())
+  propertyId      String
+  property        Property          @relation(fields: [propertyId], references: [id])
+  date            DateTime          @db.Date
+  department      RevenueDepartment
+  revenue         Int
+  revenueLastYear Int
+
+  @@unique([propertyId, date, department])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Audit log (PRD Module 16 — ADM-04)
+// ─────────────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  entity    String
+  entityId  String
+  action    String
+  oldValue  Json?
+  newValue  Json?
+  ip        String?
+  createdAt DateTime @default(now())
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// STUB MODELS — schema + minimal list/get API surface only, no screen yet.
+// ═══════════════════════════════════════════════════════════════════════
+
+// --- CRM & Loyalty (PRD Module 8) ---------------------------------------
+
+model LoyaltyProfile {
+  id      String @id @default(cuid())
+  guestId String @unique
+  guest   Guest  @relation(fields: [guestId], references: [id])
+  tier    String @default("Silver")
+  points  Int    @default(0)
+}
+
+model MarketingCampaign {
+  id          String    @id @default(cuid())
+  name        String
+  segment     String
+  channel     String
+  status      String    @default("draft")
+  scheduledAt DateTime?
+}
+
+// --- MICE / Banquet & Event (PRD Module 9) ------------------------------
+
+model EventSpace {
+  id         String   @id @default(cuid())
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id])
+  name       String
+  capacity   Int
+
+  bookings EventBooking[]
+}
+
+model EventBooking {
+  id                 String            @id @default(cuid())
+  spaceId            String
+  space              EventSpace        @relation(fields: [spaceId], references: [id])
+  name               String
+  status             String            @default("tentative")
+  startsAt           DateTime
+  endsAt             DateTime
+  pax                Int
+  corporateAccountId String?
+  corporateAccount   CorporateAccount? @relation(fields: [corporateAccountId], references: [id])
+}
+
+// --- Inventory & Procurement (PRD Module 10) ----------------------------
+
+model InventoryItem {
+  id         String   @id @default(cuid())
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id])
+  name       String
+  unit       String
+  parLevel   Int
+  stockQty   Int
+
+  purchaseOrderItems PurchaseOrderItem[]
+}
+
+model PurchaseOrder {
+  id         String   @id @default(cuid())
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id])
+  vendorName String
+  status     String   @default("draft")
+  total      Int      @default(0)
+
+  items     PurchaseOrderItem[]
+  createdAt DateTime            @default(now())
+}
+
+model PurchaseOrderItem {
+  id              String        @id @default(cuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  itemId          String
+  item            InventoryItem @relation(fields: [itemId], references: [id])
+  qty             Int
+  unitCost        Int
+}
+
+// --- HR, Duty Roster & Payroll (PRD Module 11) --------------------------
+
+enum ShiftType {
+  MORNING
+  AFTERNOON
+  NIGHT
+  SPLIT
+}
+
+model DutyShift {
+  id         String    @id @default(cuid())
+  employeeId String
+  employee   Employee  @relation(fields: [employeeId], references: [id])
+  date       DateTime  @db.Date
+  shiftType  ShiftType
+}
+
+// --- Accounting (PRD Module 13) -----------------------------------------
+
+model GLAccount {
+  id            String @id @default(cuid())
+  code          String @unique
+  name          String
+  usaliCategory String
+
+  journalLines JournalLine[]
+}
+
+model JournalEntry {
+  id          String   @id @default(cuid())
+  propertyId  String
+  property    Property @relation(fields: [propertyId], references: [id])
+  date        DateTime @db.Date
+  description String
+
+  lines JournalLine[]
+}
+
+model JournalLine {
+  id             String       @id @default(cuid())
+  journalEntryId String
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id])
+  accountId      String
+  account        GLAccount    @relation(fields: [accountId], references: [id])
+  debit          Int          @default(0)
+  credit         Int          @default(0)
+}
