@@ -75,6 +75,14 @@ export async function chargeToRoom(orderId: string, roomNumber: string) {
   });
   if (!occupant) throw new Error("Kamar tidak sedang ditempati tamu in-house");
 
+  // Atomic claim: two terminals/tabs charging the same order at the same
+  // instant would otherwise both pass the checks above and each post their
+  // own folio transaction, double-billing the guest. Only the request that
+  // actually flips OPEN -> CLOSED here may proceed to post the charge; the
+  // loser sees a clear error instead of silently duplicating it.
+  const claim = await prisma.pOSOrder.updateMany({ where: { id: orderId, status: "OPEN" }, data: { status: "CLOSED", openOutletKey: null } });
+  if (claim.count === 0) throw new Error("Order ini sudah diposting sebelumnya.");
+
   let folio = occupant.reservation.folios.find((f) => f.type === "A");
   if (!folio) {
     folio = await prisma.folio.create({
@@ -85,7 +93,6 @@ export async function chargeToRoom(orderId: string, roomNumber: string) {
   await prisma.folioTransaction.create({
     data: { folioId: folio.id, date: new Date(new Date().toDateString()), code: "FB-RST", description: `${order.outlet.name} — meja ${order.tableNumber}`, debit: order.total, credit: 0, postedById: session.user.id },
   });
-  await prisma.pOSOrder.update({ where: { id: orderId }, data: { status: "CLOSED", openOutletKey: null } });
   await prisma.auditLog.create({ data: { userId: session.user.id, entity: "POSOrder", entityId: orderId, action: "charge_to_room", newValue: { roomNumber } } });
 
   revalidatePath("/front-desk/pos");

@@ -2,7 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { FolioType, ReservationStatus } from "@prisma/client";
+import { FolioType, ReservationStatus, Prisma } from "@prisma/client";
 import { redirect } from "next/navigation";
 
 function startOfDay(d: Date) {
@@ -66,19 +66,32 @@ export async function assignRoomAndCheckIn(reservationId: string, roomId: string
     const nights = Math.round((reservation.departure.getTime() - reservation.arrival.getTime()) / 86400000);
     const primary = reservation.rooms[0];
     const roomNo = roomId && !primary.roomId ? (await prisma.room.findUnique({ where: { id: roomId } }))?.number : primary.room?.number;
-    const folio = await prisma.folio.create({
-      data: {
-        reservationId,
-        type: FolioType.A,
-        ownerLabel: `${reservation.guest.name} · Kamar ${roomNo ?? "-"} · ${nights} malam`,
-        routingNote: reservation.corporateAccount ? `Room charge & pajak → folio korporat. Incidental tetap di folio ini.` : "Seluruh charge tetap di folio ini.",
-      },
-    });
-    folioId = folio.id;
-    const nightlyRate = primary.roomType.barRate;
-    await prisma.folioTransaction.create({
-      data: { folioId, date: TODAY, code: "ROOM", description: `Room charge ${primary.roomType.name} ${roomNo ?? ""}`.trim(), debit: nightlyRate, credit: 0 },
-    });
+    try {
+      const folio = await prisma.folio.create({
+        data: {
+          reservationId,
+          type: FolioType.A,
+          ownerLabel: `${reservation.guest.name} · Kamar ${roomNo ?? "-"} · ${nights} malam`,
+          routingNote: reservation.corporateAccount ? `Room charge & pajak → folio korporat. Incidental tetap di folio ini.` : "Seluruh charge tetap di folio ini.",
+        },
+      });
+      folioId = folio.id;
+      const nightlyRate = primary.roomType.barRate;
+      await prisma.folioTransaction.create({
+        data: { folioId, date: TODAY, code: "ROOM", description: `Room charge ${primary.roomType.name} ${roomNo ?? ""}`.trim(), debit: nightlyRate, credit: 0 },
+      });
+    } catch (err) {
+      // Two concurrent "Selesaikan check-in" submissions (e.g. two front-desk
+      // tabs on the same reservation) could otherwise both see no folio yet
+      // and each create their own Folio A + room-charge transaction. The
+      // unique (reservationId, type) constraint lets the DB reject the
+      // loser; it just reuses the winner's folio instead of duplicating it.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        folioId = (await prisma.folio.findFirstOrThrow({ where: { reservationId } })).id;
+      } else {
+        throw err;
+      }
+    }
   }
 
   await prisma.auditLog.create({

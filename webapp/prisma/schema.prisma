@@ -313,6 +313,12 @@ model Folio {
   payments     Payment[]
 
   createdAt DateTime @default(now())
+
+  // Enforces "at most one folio of a given type per reservation" at the DB
+  // level — check-in's "create the guest folio if none exists yet" read-
+  // then-write would otherwise let two concurrent check-in submissions
+  // (e.g. two front-desk tabs) each create their own Folio A.
+  @@unique([reservationId, type])
 }
 
 model FolioTransaction {
